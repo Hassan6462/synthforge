@@ -1,5 +1,6 @@
 import { ColumnDefinition, GenerationSettings, TableSchema, CategoryWeight } from '../types';
 import { PRNG } from './prng';
+import { applyPrivacyTransform, applyEdgeCaseInjection } from './privacyAndEdgeCases';
 
 // Realistic Seed Datasets
 const FIRST_NAMES = [
@@ -186,6 +187,14 @@ export function generateColumnValue(
     } else if (typeof val === 'number') {
       val = -999;
     }
+  }
+
+  // Apply privacy options (mask, hash, laplace noise)
+  val = applyPrivacyTransform(val, col);
+
+  // Apply edge cases if enabled
+  if (settings.injectEdgeCases) {
+    val = applyEdgeCaseInjection(val, col, rowIndex, settings);
   }
 
   return val;

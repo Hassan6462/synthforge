@@ -1,5 +1,6 @@
 import { faker } from '@faker-js/faker';
-import type { ColumnDefinition, CategoryWeight, SqlDialect } from '../types';
+import type { ColumnDefinition, CategoryWeight, SqlDialect, GenerationSettings } from '../types';
+import { applyPrivacyTransform, applyEdgeCaseInjection } from './privacyAndEdgeCases';
 
 /**
  * Weighted category random selection using faker
@@ -119,7 +120,8 @@ export function generateTabularPreview(
   schema: ColumnDefinition[],
   rowCount: number,
   seed: number,
-  previewLimit: number = 50
+  previewLimit: number = 50,
+  settings?: GenerationSettings
 ): { rows: Record<string, any>[]; nullCount: number; durationMs: number } {
   const startTime = performance.now();
   faker.seed(seed);
@@ -135,6 +137,8 @@ export function generateTabularPreview(
 
   for (let r = 0; r < targetCount; r++) {
     const row: Record<string, any> = {};
+    const prevRow = r > 0 ? rows[r - 1] : undefined;
+
     for (const col of schema) {
       const nullPct = Number(col.nullPercentage) || 0;
       if (nullPct > 0 && faker.number.float({ min: 0, max: 100 }) < nullPct) {
@@ -143,9 +147,9 @@ export function generateTabularPreview(
         continue;
       }
 
+      let val: any;
       if (col.isUnique) {
         const uSet = uniqueSets.get(col.id)!;
-        let val: any;
         let attempts = 0;
         do {
           val = generateRawValue(col, r);
@@ -156,10 +160,20 @@ export function generateTabularPreview(
           val = typeof val === 'number' ? val + r + 1 : `${val}_${r + 1}`;
         }
         uSet.add(val);
-        row[col.name] = val;
       } else {
-        row[col.name] = generateRawValue(col, r);
+        val = generateRawValue(col, r);
       }
+
+      // Apply Privacy transforms (mask, hash, laplace noise)
+      val = applyPrivacyTransform(val, col);
+
+      // Apply Edge cases if settings enabled
+      if (settings?.injectEdgeCases) {
+        val = applyEdgeCaseInjection(val, col, r, settings, prevRow?.[col.name]);
+      }
+
+      if (val === null) nullCount++;
+      row[col.name] = val;
     }
     rows.push(row);
   }
@@ -167,3 +181,4 @@ export function generateTabularPreview(
   const durationMs = Math.round(performance.now() - startTime);
   return { rows, nullCount, durationMs };
 }
+

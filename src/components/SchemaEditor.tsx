@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Plus,
   Trash2,
@@ -13,8 +13,13 @@ import {
   Calendar,
   Layers,
   HelpCircle,
+  Shield,
+  Activity,
+  Upload,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { ColumnDataType, ColumnDefinition, CategoryWeight } from '../types';
+import { parseUploadedDataFile } from '../utils/csvParser';
 
 interface SchemaEditorProps {
   columns: ColumnDefinition[];
@@ -45,6 +50,19 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({
   const [activeColId, setActiveColId] = useState<string | null>(columns[0]?.id || null);
   const [newColName, setNewColName] = useState<string>('');
   const [newColType, setNewColType] = useState<ColumnDataType>('full name');
+  const csvFileRef = useRef<HTMLInputElement>(null);
+
+  const handleUploadSampleCsv = async (file: File) => {
+    try {
+      const parsed = await parseUploadedDataFile(file);
+      if (parsed.columns.length > 0) {
+        onChangeColumns(parsed.columns);
+        setActiveColId(parsed.columns[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to parse uploaded sample CSV:', err);
+    }
+  };
 
   // Reorder column up
   const handleMoveUp = (index: number) => {
@@ -200,16 +218,39 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({
             ({columns.length} columns configured)
           </span>
         </div>
-        {onClose && (
+        <div className="flex items-center gap-2">
+          <input
+            ref={csvFileRef}
+            type="file"
+            accept=".csv,.tsv,.json,.xlsx"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleUploadSampleCsv(file);
+              e.target.value = '';
+            }}
+          />
           <button
             type="button"
-            onClick={onClose}
-            className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
-            aria-label="Close Schema Editor"
+            onClick={() => csvFileRef.current?.click()}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] cursor-pointer"
+            style={{ borderColor: 'var(--border-subtle)' }}
+            title="Upload sample CSV/JSON/XLSX to auto-detect schema and distributions"
           >
-            <X className="w-4 h-4" />
+            <Upload className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">Upload Sample CSV</span>
           </button>
-        )}
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
+              aria-label="Close Schema Editor"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Editor Layout: Left Column List & Reordering | Right Column Inspector */}
@@ -303,6 +344,24 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({
                           title={`${col.nullPercentage}% null rate`}
                         >
                           {col.nullPercentage}% null
+                        </span>
+                      )}
+                      {col.privacy && col.privacy !== 'none' && (
+                        <span
+                          className={`px-1 py-0.2 rounded text-[10px] font-mono font-semibold ${
+                            col.privacy === 'mask' ? 'text-purple-400 bg-purple-500/10' : 'text-indigo-400 bg-indigo-500/10'
+                          }`}
+                          title={`Privacy rule: ${col.privacy}`}
+                        >
+                          {col.privacy.toUpperCase()}
+                        </span>
+                      )}
+                      {col.laplaceEpsilon && col.laplaceEpsilon > 0 && (
+                        <span
+                          className="px-1 py-0.2 rounded text-[10px] font-mono text-teal-400 bg-teal-500/10 font-semibold"
+                          title={`Laplace DP Noise: ε=${col.laplaceEpsilon}`}
+                        >
+                          DP ε={col.laplaceEpsilon}
                         </span>
                       )}
                     </div>
@@ -448,6 +507,78 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({
                     className="w-4 h-4 rounded border text-[var(--accent-primary)] cursor-pointer"
                   />
                 </label>
+              </div>
+
+              {/* Per-Column Privacy Options (none, mask, hash, laplace noise) */}
+              <div className="pt-4 border-t space-y-3" style={{ borderColor: 'var(--border-subtle)' }}>
+                <div className="flex items-center justify-between text-xs font-semibold text-[var(--text-secondary)]">
+                  <div className="flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Column Privacy Protection</span>
+                  </div>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono">None · Mask · Hash</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {(['none', 'mask', 'hash'] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => handleUpdateColumn(activeColumn.id, { privacy: opt })}
+                      className={`p-2 rounded-xl border text-xs font-medium cursor-pointer transition-all ${
+                        (activeColumn.privacy || 'none') === opt
+                          ? 'border-purple-500 bg-purple-500/10 text-purple-400 font-bold shadow-xs'
+                          : 'border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-surface-subtle)]'
+                      }`}
+                    >
+                      <span className="capitalize block">{opt}</span>
+                      <span className="text-[9px] text-[var(--text-muted)] font-normal block mt-0.5">
+                        {opt === 'none' ? 'Raw value' : opt === 'mask' ? 'Show first letters' : 'SHA-256 Hash'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Laplace Differential Privacy Noise Slider for Numeric Columns */}
+                {(activeColumn.type === 'integer' || activeColumn.type === 'float') && (
+                  <div
+                    className="p-3 rounded-xl border space-y-2 mt-2"
+                    style={{
+                      backgroundColor: 'var(--bg-surface-subtle)',
+                      borderColor: 'var(--border-subtle)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <label htmlFor="laplaceEps" className="font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
+                        <Activity className="w-3.5 h-3.5 text-teal-400" />
+                        <span>Laplace Noise (Differential Privacy)</span>
+                      </label>
+                      <span className="font-mono font-bold text-teal-400 text-xs">
+                        {activeColumn.laplaceEpsilon ? `ε = ${activeColumn.laplaceEpsilon.toFixed(1)}` : 'Off (ε = 0)'}
+                      </span>
+                    </div>
+
+                    <input
+                      id="laplaceEps"
+                      type="range"
+                      min={0}
+                      max={10}
+                      step={0.2}
+                      value={activeColumn.laplaceEpsilon || 0}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        handleUpdateColumn(activeColumn.id, { laplaceEpsilon: val === 0 ? undefined : val });
+                      }}
+                      className="w-full accent-teal-500 cursor-pointer"
+                    />
+
+                    <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)] font-mono">
+                      <span>0.0 (No Noise)</span>
+                      <span>Low ε (More Noise)</span>
+                      <span>High ε (Subtle Noise)</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Min/Max Controls (for Numeric, String, Date) */}

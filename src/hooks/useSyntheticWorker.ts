@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { ColumnDefinition, GeneratedDataStats, SqlDialect } from '../types';
+import type { ColumnDefinition, GeneratedDataStats, SqlDialect, GenerationSettings } from '../types';
 import type { GenerateWorkerMessage, GenerateWorkerResponse } from '../workers/generator.worker';
 import {
   generateTabularPreview,
@@ -49,6 +49,7 @@ export function useSyntheticWorker() {
     schema: ColumnDefinition[];
     rowCount: number;
     seed: number;
+    settings?: GenerationSettings;
   } | null>(null);
 
   const [previewRows, setPreviewRows] = useState<Record<string, any>[]>([]);
@@ -66,13 +67,14 @@ export function useSyntheticWorker() {
 
   // Local fallback preview runner (guaranteed 100% reliability, takes ~2ms)
   const runLocalPreview = useCallback(
-    (params: { schema: ColumnDefinition[]; rowCount: number; seed: number }) => {
+    (params: { schema: ColumnDefinition[]; rowCount: number; seed: number; settings?: GenerationSettings }) => {
       try {
         const { rows, nullCount, durationMs } = generateTabularPreview(
           params.schema,
           params.rowCount,
           params.seed,
-          50
+          50,
+          params.settings
         );
 
         setPreviewRows(rows);
@@ -234,13 +236,13 @@ export function useSyntheticWorker() {
    * Request preview generation with 400ms debounce
    */
   const requestDebouncedPreview = useCallback(
-    (schema: ColumnDefinition[], rowCount: number, seed: number) => {
+    (schema: ColumnDefinition[], rowCount: number, seed: number, settings?: GenerationSettings) => {
       if (debounceTimerRef.current) {
         window.clearTimeout(debounceTimerRef.current);
       }
 
       setIsGenerating(true);
-      lastPreviewParamsRef.current = { schema, rowCount, seed };
+      lastPreviewParamsRef.current = { schema, rowCount, seed, settings };
 
       debounceTimerRef.current = window.setTimeout(() => {
         const taskId = `task_${Date.now()}_${Math.random()}`;
@@ -255,6 +257,7 @@ export function useSyntheticWorker() {
               rowCount,
               seed,
               previewLimit: 50,
+              settings,
             };
             workerRef.current.postMessage(msg);
             return;
@@ -264,7 +267,7 @@ export function useSyntheticWorker() {
         }
 
         // Run local generator fallback
-        runLocalPreview({ schema, rowCount, seed });
+        runLocalPreview({ schema, rowCount, seed, settings });
       }, 400); // 400ms debounce
     },
     [runLocalPreview]
@@ -282,8 +285,9 @@ export function useSyntheticWorker() {
       format: 'csv' | 'json' | 'sql';
       sqlDialect?: SqlDialect;
       csvDelimiter?: string;
+      settings?: GenerationSettings;
     }) => {
-      const { taskId, schema, rowCount, seed, format, sqlDialect = 'postgresql', csvDelimiter = ',' } = options;
+      const { taskId, schema, rowCount, seed, format, sqlDialect = 'postgresql', csvDelimiter = ',', settings } = options;
       const startTime = performance.now();
       isCancelledRef.current = false;
 
@@ -462,6 +466,7 @@ export function useSyntheticWorker() {
       format: 'csv' | 'json' | 'sql';
       sqlDialect?: SqlDialect;
       csvDelimiter?: string;
+      settings?: GenerationSettings;
     }) => {
       const taskId = `export_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       activeExportTaskIdRef.current = taskId;
@@ -492,6 +497,7 @@ export function useSyntheticWorker() {
             format: options.format,
             sqlDialect: options.sqlDialect || 'postgresql',
             csvDelimiter: options.csvDelimiter || ',',
+            settings: options.settings,
           };
           workerRef.current.postMessage(msg);
           return;
@@ -509,6 +515,7 @@ export function useSyntheticWorker() {
         format: options.format,
         sqlDialect: options.sqlDialect,
         csvDelimiter: options.csvDelimiter,
+        settings: options.settings,
       });
     },
     [runLocalChunkedExport]

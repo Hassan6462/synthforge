@@ -1,11 +1,12 @@
 import { faker } from '@faker-js/faker';
-import type { ColumnDefinition, CategoryWeight, SqlDialect } from '../types';
+import type { ColumnDefinition, CategoryWeight, SqlDialect, GenerationSettings } from '../types';
 import {
   generateRawValue,
   escapeCsv,
   mapSqlType,
   generateTabularPreview,
 } from '../utils/tabularFakerGenerator';
+import { applyPrivacyTransform, applyEdgeCaseInjection } from '../utils/privacyAndEdgeCases';
 
 export interface GenerateWorkerMessage {
   taskId: string;
@@ -17,6 +18,7 @@ export interface GenerateWorkerMessage {
   format?: 'csv' | 'json' | 'sql';
   sqlDialect?: SqlDialect;
   csvDelimiter?: string;
+  settings?: GenerationSettings;
 }
 
 export interface GenerateWorkerResponse {
@@ -53,6 +55,7 @@ self.onmessage = async (e: MessageEvent<GenerateWorkerMessage>) => {
     format = 'csv',
     sqlDialect = 'postgresql',
     csvDelimiter = ',',
+    settings,
   } = e.data;
 
   // Handle Cancel
@@ -69,7 +72,8 @@ self.onmessage = async (e: MessageEvent<GenerateWorkerMessage>) => {
         schema,
         rowCount,
         seed,
-        previewLimit || 50
+        previewLimit || 50,
+        settings
       );
 
       self.postMessage({
@@ -151,19 +155,22 @@ self.onmessage = async (e: MessageEvent<GenerateWorkerMessage>) => {
         const currentChunkTarget = Math.min(generated + chunkSize, totalRows);
         let chunkText = '';
 
+        let prevRowVals: any[] | undefined = undefined;
+
         for (let r = generated; r < currentChunkTarget; r++) {
           const rowValues: any[] = [];
 
-          for (const col of schema) {
+          for (let colIdx = 0; colIdx < schema.length; colIdx++) {
+            const col = schema[colIdx];
             const nullPct = Number(col.nullPercentage) || 0;
             if (nullPct > 0 && faker.number.float({ min: 0, max: 100 }) < nullPct) {
               rowValues.push(null);
               continue;
             }
 
+            let val: any;
             if (col.isUnique) {
               const uSet = uniqueSets.get(col.id)!;
-              let val: any;
               let attempts = 0;
               do {
                 val = generateRawValue(col, r);
@@ -174,11 +181,22 @@ self.onmessage = async (e: MessageEvent<GenerateWorkerMessage>) => {
                 val = typeof val === 'number' ? val + r + 1 : `${val}_${r + 1}`;
               }
               uSet.add(val);
-              rowValues.push(val);
             } else {
-              rowValues.push(generateRawValue(col, r));
+              val = generateRawValue(col, r);
             }
+
+            // Apply privacy transforms
+            val = applyPrivacyTransform(val, col);
+
+            // Apply edge cases if settings enabled
+            if (settings?.injectEdgeCases) {
+              val = applyEdgeCaseInjection(val, col, r, settings, prevRowVals?.[colIdx]);
+            }
+
+            rowValues.push(val);
           }
+
+          prevRowVals = rowValues;
 
           if (format === 'csv') {
             const line = rowValues.map((v) => escapeCsv(v, csvDelimiter)).join(csvDelimiter);

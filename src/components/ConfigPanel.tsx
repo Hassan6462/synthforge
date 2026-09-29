@@ -11,6 +11,7 @@ import {
   Trash2,
   X,
   Shield,
+  AlertTriangle,
   FileSpreadsheet,
   Code,
   FileText,
@@ -285,6 +286,112 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   className="rounded border text-[var(--accent-primary)] focus:ring-[var(--accent-primary)] w-4 h-4 cursor-pointer"
                 />
               </label>
+            </div>
+
+            {/* Inject Edge Cases Stress-Testing Section */}
+            <div className="pt-3 border-t space-y-2.5" style={{ borderColor: 'var(--border-subtle)' }}>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" />
+                  <div>
+                    <span className="text-xs font-semibold text-[var(--text-primary)] block">
+                      Inject Edge Cases
+                    </span>
+                    <span className="text-[10px] text-[var(--text-muted)]">
+                      Stress-test pipelines against boundary anomalies
+                    </span>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={!!settings.injectEdgeCases}
+                  onChange={(e) => onUpdateSettings({ injectEdgeCases: e.target.checked })}
+                  className="rounded border text-amber-500 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+
+              {settings.injectEdgeCases && (
+                <div
+                  className="p-3 rounded-xl border space-y-3 animate-fadeIn"
+                  style={{
+                    backgroundColor: 'var(--bg-surface-subtle)',
+                    borderColor: 'var(--border-subtle)',
+                  }}
+                >
+                  {/* Intensity Selector */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-[var(--text-secondary)]">Intensity</span>
+                      <span className="font-mono text-[11px] font-bold text-amber-400 capitalize">
+                        {settings.edgeCaseIntensity || 'medium'} (
+                        {settings.edgeCaseIntensity === 'high' ? '30%' : settings.edgeCaseIntensity === 'low' ? '5%' : '15%'} rows)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(['low', 'medium', 'high'] as const).map((lvl) => (
+                        <button
+                          key={lvl}
+                          type="button"
+                          onClick={() => onUpdateSettings({ edgeCaseIntensity: lvl })}
+                          className={`py-1 rounded-lg text-xs font-mono font-semibold capitalize cursor-pointer transition-colors ${
+                            (settings.edgeCaseIntensity || 'medium') === lvl
+                              ? 'bg-amber-500 text-black shadow-xs font-bold'
+                              : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                          }`}
+                        >
+                          {lvl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Edge Case Types Checkboxes */}
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider block">
+                      Anomaly Types
+                    </span>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {[
+                        { key: 'nulls', label: 'Nulls & Empty' },
+                        { key: 'extremeValues', label: 'Extreme Values' },
+                        { key: 'duplicates', label: 'Duplicates' },
+                        { key: 'unicodeEmoji', label: 'Unicode / Emojis' },
+                        { key: 'veryLongText', label: 'Very Long Text' },
+                        { key: 'invalidFormats', label: 'Invalid Formats' },
+                      ].map((item) => {
+                        const types = settings.edgeCaseTypes || {
+                          nulls: true,
+                          extremeValues: true,
+                          duplicates: true,
+                          unicodeEmoji: true,
+                          veryLongText: true,
+                          invalidFormats: true,
+                        };
+                        const isChecked = types[item.key as keyof typeof types] ?? true;
+
+                        return (
+                          <label key={item.key} className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                onUpdateSettings({
+                                  edgeCaseTypes: {
+                                    ...types,
+                                    [item.key]: e.target.checked,
+                                  },
+                                });
+                              }}
+                              className="rounded border text-amber-500 w-3.5 h-3.5 cursor-pointer"
+                            />
+                            <span className="text-[11px] text-[var(--text-secondary)]">{item.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
