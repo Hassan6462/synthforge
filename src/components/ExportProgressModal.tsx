@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Download, X, CheckCircle2, Cpu, AlertOctagon, FileText } from 'lucide-react';
 import { ExportProgressState } from '../hooks/useSyntheticWorker';
 
@@ -13,7 +13,22 @@ export const ExportProgressModal: React.FC<ExportProgressModalProps> = ({
   onCancel,
   onClose,
 }) => {
-  if (!progress.isExporting && !progress.isComplete) {
+  const isOpen = progress.isExporting || progress.isComplete;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (progress.isComplete) onClose();
+        else onCancel();
+      }
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isOpen, progress.isComplete, onClose, onCancel]);
+
+  if (!isOpen) {
     return null;
   }
 
@@ -25,7 +40,12 @@ export const ExportProgressModal: React.FC<ExportProgressModalProps> = ({
       : 'SQL INSERT Script';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="export-progress-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn"
+    >
       <div
         className="w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden p-6 space-y-6"
         style={{
@@ -50,7 +70,7 @@ export const ExportProgressModal: React.FC<ExportProgressModalProps> = ({
               )}
             </div>
             <div>
-              <h3 className="text-base font-bold text-[var(--text-primary)]">
+              <h3 id="export-progress-title" className="text-base font-bold text-[var(--text-primary)]">
                 {progress.isComplete ? 'Synthetic Export Ready' : `Generating ${formatTitle}`}
               </h3>
               <p className="text-xs text-[var(--text-muted)] mt-0.5">

@@ -1,16 +1,57 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
+import type { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
-import { generateKeywordFallbackSchema } from './src/utils/keywordTemplates';
-import { generateCopilotFallbackPatch } from './src/utils/copilotFallback';
+import { generateKeywordFallbackSchema } from './src/utils/keywordTemplates.ts';
+import { generateCopilotFallbackPatch } from './src/utils/copilotFallback.ts';
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+const rawModel = process.env.GEMINI_MODEL;
+const GEMINI_MODEL = (!rawModel || rawModel === 'gemini-2.5-flash') ? 'gemini-3.8-flash' : rawModel;
+const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '30000', 10);
 
 app.use(express.json());
+
+async function generateContentWithQuotaFallback(ai: GoogleGenAI, contents: string, config: any) {
+  const models = [GEMINI_MODEL];
+  if (GEMINI_MODEL !== 'gemini-3.1-flash-lite') {
+    models.push('gemini-3.1-flash-lite');
+  }
+
+  let lastErr: any = null;
+  for (const model of models) {
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini API call timed out')), GEMINI_TIMEOUT_MS)
+      );
+
+      const geminiPromise = ai.models.generateContent({
+        model,
+        contents,
+        config,
+      });
+
+      return await Promise.race([geminiPromise, timeoutPromise]);
+    } catch (err: any) {
+      lastErr = err;
+      const msg = err?.message || String(err);
+      const isQuotaOrDemand =
+        msg.includes('resource_exhausted') ||
+        msg.includes('quota') ||
+        msg.includes('429') ||
+        msg.includes('503') ||
+        msg.includes('high demand');
+      if (!isQuotaOrDemand) {
+        throw err;
+      }
+    }
+  }
+  throw lastErr;
+}
 
 // Server-side endpoint: POST /api/generate-schema
 app.post('/api/generate-schema', async (req: Request, res: Response) => {
@@ -22,6 +63,7 @@ app.post('/api/generate-schema', async (req: Request, res: Response) => {
 
   const cleanPrompt = prompt.trim();
   const apiKey = process.env.GEMINI_API_KEY;
+  let fallbackReason = apiKey ? '' : 'No GEMINI_API_KEY configured in environment';
 
   if (apiKey) {
     try {
@@ -34,95 +76,89 @@ app.post('/api/generate-schema', async (req: Request, res: Response) => {
         },
       });
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Gemini API call timed out')), 4000)
-      );
-
-      const geminiPromise = ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: `You are an expert synthetic data and database architect. Generate a realistic schema based on the following user request: "${cleanPrompt}".
+      const promptContents = `You are an expert synthetic data and database architect. Generate a realistic schema based on the following user request: "${cleanPrompt}".
 Determine whether the user is asking for a single Tabular dataset or a multi-table Relational database.
 If counts are specified (e.g. "1000 customers and 5000 orders"), assign them appropriately.
 Supported column types: integer, float, string, boolean, date, category, uuid, email, full name, phone, address, company.
-Always return strict JSON conforming to the requested schema.`,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              mode: { type: Type.STRING, description: 'Either "tabular" or "relational"' },
-              summary: { type: Type.STRING, description: 'Brief summary of the designed schema' },
-              rowCount: { type: Type.NUMBER, description: 'Default rows for tabular mode' },
-              tabularColumns: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING },
-                    name: { type: Type.STRING },
-                    type: { type: Type.STRING },
-                    nullPercentage: { type: Type.NUMBER },
-                    isUnique: { type: Type.BOOLEAN },
-                    min: { type: Type.NUMBER },
-                    max: { type: Type.NUMBER },
-                    precision: { type: Type.NUMBER },
-                    minDate: { type: Type.STRING },
-                    maxDate: { type: Type.STRING },
-                  },
-                  required: ['id', 'name', 'type', 'nullPercentage', 'isUnique'],
+Always return strict JSON conforming to the requested schema.`;
+
+      const promptConfig = {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            mode: { type: Type.STRING, description: 'Either "tabular" or "relational"' },
+            summary: { type: Type.STRING, description: 'Brief summary of the designed schema' },
+            rowCount: { type: Type.NUMBER, description: 'Default rows for tabular mode' },
+            tabularColumns: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  name: { type: Type.STRING },
+                  type: { type: Type.STRING },
+                  nullPercentage: { type: Type.NUMBER },
+                  isUnique: { type: Type.BOOLEAN },
+                  min: { type: Type.NUMBER },
+                  max: { type: Type.NUMBER },
+                  precision: { type: Type.NUMBER },
+                  minDate: { type: Type.STRING },
+                  maxDate: { type: Type.STRING },
                 },
-              },
-              relationalTables: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING },
-                    name: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    primaryKey: { type: Type.STRING },
-                    rowCount: { type: Type.NUMBER },
-                    columns: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          id: { type: Type.STRING },
-                          name: { type: Type.STRING },
-                          type: { type: Type.STRING },
-                          nullPercentage: { type: Type.NUMBER },
-                          isUnique: { type: Type.BOOLEAN },
-                          min: { type: Type.NUMBER },
-                          max: { type: Type.NUMBER },
-                        },
-                        required: ['id', 'name', 'type', 'nullPercentage', 'isUnique'],
-                      },
-                    },
-                    foreignKeys: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          id: { type: Type.STRING },
-                          column: { type: Type.STRING },
-                          targetTable: { type: Type.STRING },
-                          targetColumn: { type: Type.STRING },
-                          cardinality: { type: Type.STRING },
-                        },
-                        required: ['id', 'column', 'targetTable', 'targetColumn', 'cardinality'],
-                      },
-                    },
-                  },
-                  required: ['id', 'name', 'description', 'primaryKey', 'columns'],
-                },
+                required: ['id', 'name', 'type', 'nullPercentage', 'isUnique'],
               },
             },
-            required: ['mode', 'summary'],
+            relationalTables: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  primaryKey: { type: Type.STRING },
+                  rowCount: { type: Type.NUMBER },
+                  columns: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        name: { type: Type.STRING },
+                        type: { type: Type.STRING },
+                        nullPercentage: { type: Type.NUMBER },
+                        isUnique: { type: Type.BOOLEAN },
+                        min: { type: Type.NUMBER },
+                        max: { type: Type.NUMBER },
+                      },
+                      required: ['id', 'name', 'type', 'nullPercentage', 'isUnique'],
+                    },
+                  },
+                  foreignKeys: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        column: { type: Type.STRING },
+                        targetTable: { type: Type.STRING },
+                        targetColumn: { type: Type.STRING },
+                        cardinality: { type: Type.STRING },
+                      },
+                      required: ['id', 'column', 'targetTable', 'targetColumn', 'cardinality'],
+                    },
+                  },
+                },
+                required: ['id', 'name', 'description', 'primaryKey', 'columns'],
+              },
+            },
           },
+          required: ['mode', 'summary'],
         },
-      });
+      };
 
-      const response = await Promise.race([geminiPromise, timeoutPromise]);
+      const response = await generateContentWithQuotaFallback(ai, promptContents, promptConfig);
 
       const text = response.text?.trim();
       if (text) {
@@ -139,7 +175,8 @@ Always return strict JSON conforming to the requested schema.`,
         }
       }
     } catch (err: any) {
-      console.warn('Gemini schema generation failed, using intelligent template fallback:', err?.message || err);
+      fallbackReason = err?.message || 'Gemini API call failed';
+      console.error('Gemini error:', fallbackReason);
     }
   }
 
@@ -148,6 +185,7 @@ Always return strict JSON conforming to the requested schema.`,
   return res.json({
     success: true,
     source: 'fallback',
+    reason: fallbackReason || 'Offline rule-based schema generator used',
     data: fallbackData,
   });
 });
@@ -162,6 +200,7 @@ app.post('/api/copilot', async (req: Request, res: Response) => {
 
   const cleanPrompt = prompt.trim();
   const apiKey = process.env.GEMINI_API_KEY;
+  let fallbackReason = apiKey ? '' : 'No GEMINI_API_KEY configured in environment';
 
   if (apiKey) {
     try {
@@ -174,13 +213,7 @@ app.post('/api/copilot', async (req: Request, res: Response) => {
         },
       });
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Gemini API call timed out')), 4000)
-      );
-
-      const geminiPromise = ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: `You are an expert synthetic data schema copilot. The user wants to modify their data schema based on this instruction: "${cleanPrompt}".
+      const copilotContents = `You are an expert synthetic data schema copilot. The user wants to modify their data schema based on this instruction: "${cleanPrompt}".
 Current columns: ${JSON.stringify(currentColumns.map((c: any) => ({ id: c.id, name: c.name, type: c.type, privacy: c.privacy })))}
 Current settings: ${JSON.stringify({ rowCount: currentSettings.rowCount, anonymizePII: currentSettings.anonymizePII, injectEdgeCases: currentSettings.injectEdgeCases })}
 
@@ -191,56 +224,56 @@ Actions can be:
 - "remove_column": supply target columnId.
 - "update_settings": supply partial settings object (e.g. rowCount, injectEdgeCases, edgeCaseIntensity, anonymizePII).
 
-Provide an explanation for each patch and a concise executive summary. Return strict JSON.`,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              summary: { type: Type.STRING, description: 'Executive summary of the proposed schema modifications' },
-              patches: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    action: { type: Type.STRING, description: 'One of add_column, modify_column, remove_column, update_settings' },
-                    columnId: { type: Type.STRING },
-                    column: {
-                      type: Type.OBJECT,
-                      properties: {
-                        id: { type: Type.STRING },
-                        name: { type: Type.STRING },
-                        type: { type: Type.STRING },
-                        nullPercentage: { type: Type.NUMBER },
-                        isUnique: { type: Type.BOOLEAN },
-                        min: { type: Type.NUMBER },
-                        max: { type: Type.NUMBER },
-                        precision: { type: Type.NUMBER },
-                        privacy: { type: Type.STRING },
-                        laplaceEpsilon: { type: Type.NUMBER },
-                      },
+Provide an explanation for each patch and a concise executive summary. Return strict JSON.`;
+
+      const copilotConfig = {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: { type: Type.STRING, description: 'Executive summary of the proposed schema modifications' },
+            patches: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  action: { type: Type.STRING, description: 'One of add_column, modify_column, remove_column, update_settings' },
+                  columnId: { type: Type.STRING },
+                  column: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.STRING },
+                      name: { type: Type.STRING },
+                      type: { type: Type.STRING },
+                      nullPercentage: { type: Type.NUMBER },
+                      isUnique: { type: Type.BOOLEAN },
+                      min: { type: Type.NUMBER },
+                      max: { type: Type.NUMBER },
+                      precision: { type: Type.NUMBER },
+                      privacy: { type: Type.STRING },
+                      laplaceEpsilon: { type: Type.NUMBER },
                     },
-                    settings: {
-                      type: Type.OBJECT,
-                      properties: {
-                        rowCount: { type: Type.NUMBER },
-                        anonymizePII: { type: Type.BOOLEAN },
-                        injectEdgeCases: { type: Type.BOOLEAN },
-                        edgeCaseIntensity: { type: Type.STRING },
-                      },
-                    },
-                    explanation: { type: Type.STRING, description: 'Clear reason for this patch' },
                   },
-                  required: ['action', 'explanation'],
+                  settings: {
+                    type: Type.OBJECT,
+                    properties: {
+                      rowCount: { type: Type.NUMBER },
+                      anonymizePII: { type: Type.BOOLEAN },
+                      injectEdgeCases: { type: Type.BOOLEAN },
+                      edgeCaseIntensity: { type: Type.STRING },
+                    },
+                  },
+                  explanation: { type: Type.STRING, description: 'Clear reason for this patch' },
                 },
+                required: ['action', 'explanation'],
               },
             },
-            required: ['summary', 'patches'],
           },
+          required: ['summary', 'patches'],
         },
-      });
+      };
 
-      const response = await Promise.race([geminiPromise, timeoutPromise]);
+      const response = await generateContentWithQuotaFallback(ai, copilotContents, copilotConfig);
       const text = response.text?.trim();
       if (text) {
         const parsed = JSON.parse(text);
@@ -253,7 +286,8 @@ Provide an explanation for each patch and a concise executive summary. Return st
         }
       }
     } catch (err: any) {
-      console.warn('Gemini Copilot patch failed, using fallback:', err?.message || err);
+      fallbackReason = err?.message || 'Gemini API call failed';
+      console.error('Gemini error:', fallbackReason);
     }
   }
 
@@ -262,6 +296,7 @@ Provide an explanation for each patch and a concise executive summary. Return st
   return res.json({
     success: true,
     source: 'fallback',
+    reason: fallbackReason || 'Offline rule-based copilot used',
     data: fallback,
   });
 });

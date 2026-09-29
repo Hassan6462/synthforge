@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import type { ColumnDefinition, ColumnDataType, CategoryWeight } from '../types';
 
 export interface ParsedDataResult {
@@ -255,6 +254,10 @@ export async function parseUploadedDataFile(file: File): Promise<ParsedDataResul
 
   // 2. Excel File (.xlsx, .xls)
   if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+    if (file.size > 10 * 1024 * 1024) {
+      throw new Error('Spreadsheet file exceeds the 10 MB limit. Please upload a smaller file.');
+    }
+    const XLSX = await import('xlsx');
     const arrayBuffer = await file.arrayBuffer();
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const firstSheetName = workbook.SheetNames[0];

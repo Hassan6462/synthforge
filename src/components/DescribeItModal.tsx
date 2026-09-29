@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sparkles, X, Loader2, ArrowRight, Table, Layers, CheckCircle2, AlertCircle } from 'lucide-react';
-import type { GeneratedAiSchemaResponse } from '../utils/keywordTemplates';
+import { generateKeywordFallbackSchema, type GeneratedAiSchemaResponse } from '../utils/keywordTemplates';
 
 interface DescribeItModalProps {
   isOpen: boolean;
@@ -22,6 +22,16 @@ export const DescribeItModal: React.FC<DescribeItModalProps> = ({ isOpen, onClos
   const [result, setResult] = useState<GeneratedAiSchemaResponse | null>(null);
   const [source, setSource] = useState<'gemini' | 'fallback' | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -47,12 +57,15 @@ export const DescribeItModal: React.FC<DescribeItModalProps> = ({ isOpen, onClos
       const json = await response.json();
       if (json.success && json.data) {
         setResult(json.data);
-        setSource(json.source);
+        setSource(json.source === 'gemini' ? 'gemini' : 'fallback');
       } else {
         throw new Error(json.error || 'Failed to generate schema structure');
       }
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Error communicating with schema generation server');
+    } catch {
+      // In static hosting, network error, 404, or 500: run local fallback directly!
+      const fallbackData = generateKeywordFallbackSchema(textToUse);
+      setResult(fallbackData);
+      setSource('fallback');
     } finally {
       setIsLoading(false);
     }
@@ -66,7 +79,12 @@ export const DescribeItModal: React.FC<DescribeItModalProps> = ({ isOpen, onClos
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="describe-it-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
+    >
       <div
         className="w-full max-w-2xl rounded-2xl border shadow-2xl flex flex-col max-h-[90vh] overflow-hidden"
         style={{
@@ -81,7 +99,22 @@ export const DescribeItModal: React.FC<DescribeItModalProps> = ({ isOpen, onClos
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-[var(--text-primary)]">Describe It — AI Schema Architect</h2>
+              <div className="flex items-center gap-2">
+                <h2 id="describe-it-modal-title" className="text-base font-bold text-[var(--text-primary)]">
+                  Describe It — AI Schema Architect
+                </h2>
+                {source && (
+                  <span
+                    className={`px-2 py-0.5 text-[10px] font-mono font-medium rounded border ${
+                      source === 'gemini'
+                        ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                        : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                    }`}
+                  >
+                    AI: {source === 'gemini' ? 'Gemini' : 'Offline rules'}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-[var(--text-secondary)]">
                 Generate tabular schemas or relational databases with entity relations from plain text
               </p>
@@ -90,6 +123,7 @@ export const DescribeItModal: React.FC<DescribeItModalProps> = ({ isOpen, onClos
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close dialog"
             className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -189,7 +223,7 @@ export const DescribeItModal: React.FC<DescribeItModalProps> = ({ isOpen, onClos
                 </div>
                 {source && (
                   <span className="text-[10px] text-[var(--text-muted)] font-mono">
-                    Engine: {source === 'gemini' ? 'Gemini 3.8 Flash' : 'Keyword Fallback Engine'}
+                    AI: {source === 'gemini' ? 'Gemini' : 'Offline rules'}
                   </span>
                 )}
               </div>

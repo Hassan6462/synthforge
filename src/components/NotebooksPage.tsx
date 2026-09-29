@@ -41,6 +41,7 @@ export const NotebooksPage: React.FC<NotebooksPageProps> = ({
   const [pyodideInstance, setPyodideInstance] = useState<any>(null);
   const [pyodideStatus, setPyodideStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [loadingMessage, setLoadingMessage] = useState<string>('Initializing Python WebAssembly environment...');
+  const [retryCount, setRetryCount] = useState<number>(0);
 
   // Active notebook document
   const [notebooks, setNotebooks] = useState<NotebookDocument[]>(() => {
@@ -118,7 +119,7 @@ export const NotebooksPage: React.FC<NotebooksPageProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [toast]);
+  }, [toast, retryCount]);
 
   // Persist notebooks
   const saveNotebooksToStorage = (updated: NotebookDocument[]) => {
@@ -418,6 +419,29 @@ _plot_b64
           <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs flex items-center gap-2.5 text-amber-300">
             <Loader2 className="w-4 h-4 animate-spin shrink-0" />
             <span>{loadingMessage}</span>
+          </div>
+        )}
+
+        {pyodideStatus === 'error' && (
+          <div className="p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-xs flex flex-col gap-2 text-red-300">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+              <span className="font-semibold">Unable to load Pyodide from CDN</span>
+            </div>
+            <p className="text-[11px] text-red-300/80">
+              The WebAssembly runtime script could not be downloaded. Check your internet connection or try again.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPyodideStatus('loading');
+                setRetryCount((c) => c + 1);
+              }}
+              className="self-start px-2.5 py-1 rounded bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 font-semibold cursor-pointer transition-colors text-xs flex items-center gap-1.5"
+            >
+              <RotateCw className="w-3 h-3" />
+              <span>Retry Pyodide</span>
+            </button>
           </div>
         )}
 

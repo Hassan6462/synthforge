@@ -29,13 +29,6 @@ import {
   DocumentRegion,
 } from '../types';
 import { formatCurrency } from '../utils/documentGenerators';
-import {
-  generateInvoicePdf,
-  generateBankStatementPdf,
-  convertInvoicesToCsv,
-  convertBankStatementsToCsv,
-  exportBulkDocumentsZip,
-} from '../utils/pdfExport';
 import { downloadBlob, downloadFile } from '../utils/export';
 
 interface DocumentViewerProps {
@@ -74,7 +67,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   };
 
   // Export Single PDF using jsPDF
-  const handleDownloadSinglePdf = () => {
+  const handleDownloadSinglePdf = async () => {
+    const { generateInvoicePdf, generateBankStatementPdf } = await import('../utils/pdfExport');
     if (isInvoice) {
       const inv = selectedDoc as InvoiceDocument;
       const pdf = generateInvoicePdf(inv);
@@ -100,7 +94,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   };
 
   // Export Direct CSV
-  const handleDownloadCsv = () => {
+  const handleDownloadCsv = async () => {
+    const { convertInvoicesToCsv, convertBankStatementsToCsv } = await import('../utils/pdfExport');
     if (isInvoice) {
       const csv = convertInvoicesToCsv(documents as InvoiceDocument[]);
       downloadFile(csv, `synthforge_invoices_ledger_${Date.now()}.csv`, 'text/csv;charset=utf-8;');
@@ -120,6 +115,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     setBulkProgress({ current: 0, total: documents.length });
 
     try {
+      const { exportBulkDocumentsZip } = await import('../utils/pdfExport');
       const docType = isInvoice ? 'invoice' : 'bank_statement';
       const zipBlob = await exportBulkDocumentsZip(documents, docType, (cur, tot) => {
         setBulkProgress({ current: cur, total: tot });

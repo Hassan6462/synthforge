@@ -24,6 +24,7 @@ import {
 import { parseUploadedDataFile } from '../utils/csvParser';
 import { EmptyState } from './EmptyState';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 
 interface DataSourcesPageProps {
   onOpenEdaForDataset: (dataset: StoredDataset) => void;
@@ -40,12 +41,13 @@ export const DataSourcesPage: React.FC<DataSourcesPageProps> = ({
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
+  const { user } = useAuth();
 
   const loadDatasets = async () => {
     try {
       setIsLoading(true);
       await seedDefaultDatasets();
-      const list = await getAllDatasetsFromDb();
+      const list = await getAllDatasetsFromDb(user?.id);
       setDatasets(list);
     } catch (err) {
       console.error('Failed to load datasets:', err);
@@ -56,7 +58,7 @@ export const DataSourcesPage: React.FC<DataSourcesPageProps> = ({
 
   useEffect(() => {
     loadDatasets();
-  }, []);
+  }, [user?.id]);
 
   const handleFileUpload = async (file: File) => {
     if (!file) return;
@@ -67,6 +69,7 @@ export const DataSourcesPage: React.FC<DataSourcesPageProps> = ({
 
       const newDataset: StoredDataset = {
         id: `dataset_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        userId: user?.id,
         name: file.name,
         format: parsed.format,
         sizeBytes: file.size,

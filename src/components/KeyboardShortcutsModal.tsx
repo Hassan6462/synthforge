@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, Command } from 'lucide-react';
 
 interface KeyboardShortcutsModalProps {
@@ -11,21 +11,39 @@ const SHORTCUTS = [
   { keys: ['⌘/Ctrl', 'E'], description: 'Open Export Options dialog' },
   { keys: ['⌘/Ctrl', 'S'], description: 'Save current workspace project as JSON' },
   { keys: ['⌘/Ctrl', 'O'], description: 'Load project JSON file' },
-  { keys: ['⌘/Ctrl', 'K'], description: 'Open Keyboard Shortcuts cheat sheet' },
+  { keys: ['⌘/Ctrl', 'K'], description: 'Open Command Palette' },
   { keys: ['1'], description: 'Switch to Home Dashboard' },
   { keys: ['2'], description: 'Switch to Tabular Generator' },
   { keys: ['3'], description: 'Switch to Relational Database' },
   { keys: ['4'], description: 'Switch to Complex Documents' },
-  { keys: ['5'], description: 'Switch to Data Sources (Upload)' },
-  { keys: ['6'], description: 'Switch to EDA Profiler' },
+  { keys: ['5'], description: 'Switch to Time Series Generator' },
+  { keys: ['6'], description: 'Switch to Data Sources (Upload)' },
+  { keys: ['7'], description: 'Switch to EDA Profiler' },
+  { keys: ['8'], description: 'Switch to Quality Benchmark' },
+  { keys: ['9'], description: 'Switch to Python Notebooks' },
   { keys: ['Esc'], description: 'Close any active modal or drawer' },
 ];
 
 export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ isOpen, onClose }) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="shortcuts-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
+    >
       <div
         className="w-full max-w-lg rounded-2xl border shadow-2xl flex flex-col overflow-hidden"
         style={{
@@ -39,13 +57,14 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
               <Command className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-[var(--text-primary)]">Keyboard Shortcuts</h2>
+              <h2 id="shortcuts-modal-title" className="text-base font-bold text-[var(--text-primary)]">Keyboard Shortcuts</h2>
               <p className="text-xs text-[var(--text-secondary)]">Accelerate your workflow with quick keystrokes</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close dialog"
             className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />

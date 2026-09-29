@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   CheckCircle2,
@@ -35,6 +35,16 @@ export const ValidationReportModal: React.FC<ValidationReportModalProps> = ({
 }) => {
   const [filterTab, setFilterTab] = useState<'all' | 'foreign_keys' | 'uniqueness' | 'nulls' | 'invoices'>('all');
   const [copied, setCopied] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 

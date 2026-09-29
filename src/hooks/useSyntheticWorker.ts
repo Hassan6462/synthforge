@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { ColumnDefinition, GeneratedDataStats, SqlDialect, GenerationSettings } from '../types';
+import type { ColumnDefinition, GeneratedDataStats, SqlDialect, GenerationSettings, TableSchema, DocumentRegion } from '../types';
 import type { GenerateWorkerMessage, GenerateWorkerResponse } from '../workers/generator.worker';
 import {
   generateTabularPreview,
@@ -7,6 +7,7 @@ import {
   escapeCsv,
   mapSqlType,
 } from '../utils/tabularFakerGenerator';
+import { generateRelationalData, generateDocumentData } from '../utils/generators';
 import { faker } from '@faker-js/faker';
 
 export interface ExportProgressState {
@@ -56,6 +57,23 @@ export function useSyntheticWorker() {
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [workerError, setWorkerError] = useState<string | null>(null);
   const [exportProgress, setExportProgress] = useState<ExportProgressState>(initialExportProgress);
+
+  // Relational worker state
+  const [relationalData, setRelationalData] = useState<{
+    tablesData: Record<string, any[]>;
+    relationships: any[];
+    stats: any;
+  } | null>(null);
+  const [isRelationalGenerating, setIsRelationalGenerating] = useState<boolean>(false);
+  const relationalDebounceRef = useRef<number | null>(null);
+
+  // Document worker state
+  const [documentData, setDocumentData] = useState<{
+    documents: any[];
+    stats: any;
+  } | null>(null);
+  const [isDocumentGenerating, setIsDocumentGenerating] = useState<boolean>(false);
+  const documentDebounceRef = useRef<number | null>(null);
 
   const [stats, setStats] = useState<GeneratedDataStats>({
     totalRows: 0,
@@ -196,6 +214,20 @@ export function useSyntheticWorker() {
             a.click();
             document.body.removeChild(a);
           }
+          return;
+        }
+
+        // Relational generation complete
+        if (type === 'RELATIONAL_SUCCESS' && e.data.relationalResult) {
+          setRelationalData(e.data.relationalResult);
+          setIsRelationalGenerating(false);
+          return;
+        }
+
+        // Document generation complete
+        if (type === 'DOCUMENT_SUCCESS' && e.data.documentResult) {
+          setDocumentData(e.data.documentResult);
+          setIsDocumentGenerating(false);
           return;
         }
 
@@ -550,6 +582,83 @@ export function useSyntheticWorker() {
     activeExportTaskIdRef.current = null;
   }, [exportProgress.blobUrl]);
 
+  /**
+   * Request debounced relational data generation
+   */
+  const requestDebouncedRelational = useCallback(
+    (tables: TableSchema[], settings: GenerationSettings) => {
+      if (relationalDebounceRef.current) {
+        window.clearTimeout(relationalDebounceRef.current);
+      }
+      setIsRelationalGenerating(true);
+
+      relationalDebounceRef.current = window.setTimeout(() => {
+        const taskId = `rel_${Date.now()}_${Math.random()}`;
+        if (workerRef.current && isWorkerUsableRef.current) {
+          try {
+            const msg: GenerateWorkerMessage = {
+              taskId,
+              action: 'GENERATE_RELATIONAL',
+              tables,
+              settings,
+            };
+            workerRef.current.postMessage(msg);
+            return;
+          } catch {
+            isWorkerUsableRef.current = false;
+          }
+        }
+        // Local fallback
+        try {
+          const res = generateRelationalData(tables, settings);
+          setRelationalData(res);
+        } finally {
+          setIsRelationalGenerating(false);
+        }
+      }, 250);
+    },
+    []
+  );
+
+  /**
+   * Request debounced document data generation
+   */
+  const requestDebouncedDocument = useCallback(
+    (templateType: any, settings: GenerationSettings, region?: DocumentRegion) => {
+      if (documentDebounceRef.current) {
+        window.clearTimeout(documentDebounceRef.current);
+      }
+      setIsDocumentGenerating(true);
+
+      documentDebounceRef.current = window.setTimeout(() => {
+        const taskId = `doc_${Date.now()}_${Math.random()}`;
+        if (workerRef.current && isWorkerUsableRef.current) {
+          try {
+            const msg: GenerateWorkerMessage = {
+              taskId,
+              action: 'GENERATE_DOCUMENT',
+              templateType,
+              settings,
+              documentRegion: region,
+            };
+            workerRef.current.postMessage(msg);
+            return;
+          } catch {
+            isWorkerUsableRef.current = false;
+          }
+        }
+        // Local fallback
+        try {
+          const res = generateDocumentData(templateType, settings, region);
+          setDocumentData(res);
+        } finally {
+          setIsDocumentGenerating(false);
+        }
+      }, 250);
+    },
+    []
+  );
+
   return {
     previewRows,
     isGenerating,
@@ -560,5 +669,11 @@ export function useSyntheticWorker() {
     cancelExport,
     closeExportProgress,
     exportProgress,
+    relationalData,
+    isRelationalGenerating,
+    requestDebouncedRelational,
+    documentData,
+    isDocumentGenerating,
+    requestDebouncedDocument,
   };
 }

@@ -8,7 +8,36 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(import.meta.dirname ?? '.', '.'),
+      },
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/react-is/')) {
+              return 'react';
+            }
+            if (id.includes('node_modules/recharts/')) {
+              return 'recharts';
+            }
+            if (id.includes('node_modules/@xyflow/')) {
+              return 'xyflow';
+            }
+            if (id.includes('node_modules/jspdf')) {
+              return 'jspdf';
+            }
+            if (id.includes('node_modules/xlsx')) {
+              return 'xlsx';
+            }
+            if (id.includes('node_modules/@faker-js/')) {
+              return 'faker';
+            }
+            if (id.includes('node_modules/lucide-react/')) {
+              return 'icons';
+            }
+          },
+        },
       },
     },
     server: {

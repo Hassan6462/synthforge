@@ -1,5 +1,13 @@
 import JSZip from 'jszip';
-import { ColumnDefinition, ExportFormat, GenerationSettings, SqlDialect, TableSchema } from '../types';
+import {
+  ColumnDefinition,
+  ExportFormat,
+  GenerationSettings,
+  SqlDialect,
+  TableSchema,
+  InvoiceDocument,
+  BankStatementDocument,
+} from '../types';
 
 /**
  * Escapes CSV values conforming to RFC 4180
@@ -259,7 +267,127 @@ export function exportRelationalAsSqlDump(
   return sqlParts.join('\n');
 }
 
-import { convertInvoicesToCsv, convertBankStatementsToCsv } from './pdfExport';
+/**
+ * Convert Invoices to CSV (Flattened line items with header fields)
+ */
+export function convertInvoicesToCsv(invoices: InvoiceDocument[]): string {
+  const headers = [
+    'InvoiceNumber',
+    'Date',
+    'DueDate',
+    'Region',
+    'Currency',
+    'IssuerName',
+    'IssuerTaxId',
+    'ClientName',
+    'ClientContact',
+    'ItemDescription',
+    'Quantity',
+    'UnitPrice',
+    'DiscountPercent',
+    'DiscountAmount',
+    'LineTotal',
+    'Subtotal',
+    'TotalDiscount',
+    'TaxName',
+    'TaxRate',
+    'TaxAmount',
+    'TotalDue',
+    'PaymentStatus',
+  ];
+
+  const rows: string[] = [headers.join(',')];
+
+  for (const inv of invoices) {
+    for (const item of inv.items) {
+      const line = [
+        `"${inv.invoiceNumber}"`,
+        `"${inv.date}"`,
+        `"${inv.dueDate}"`,
+        `"${inv.region}"`,
+        `"${inv.currencyCode}"`,
+        `"${inv.issuer.name.replace(/"/g, '""')}"`,
+        `"${(inv.issuer.taxId || '').replace(/"/g, '""')}"`,
+        `"${inv.client.name.replace(/"/g, '""')}"`,
+        `"${(inv.client.contactPerson || '').replace(/"/g, '""')}"`,
+        `"${item.description.replace(/"/g, '""')}"`,
+        item.quantity,
+        item.unitPrice.toFixed(2),
+        item.discountPercent,
+        item.discountAmount.toFixed(2),
+        item.lineTotal.toFixed(2),
+        inv.subtotal.toFixed(2),
+        inv.totalDiscount.toFixed(2),
+        `"${inv.taxName}"`,
+        inv.taxRate,
+        inv.taxAmount.toFixed(2),
+        inv.total.toFixed(2),
+        `"${inv.paymentStatus}"`,
+      ];
+      rows.push(line.join(','));
+    }
+  }
+
+  return rows.join('\r\n');
+}
+
+/**
+ * Convert Bank Statements to CSV (Flattened transaction ledger with statement header fields)
+ */
+export function convertBankStatementsToCsv(statements: BankStatementDocument[]): string {
+  const headers = [
+    'StatementId',
+    'BankName',
+    'Region',
+    'Currency',
+    'AccountHolder',
+    'AccountNumber',
+    'RoutingOrIBAN',
+    'StatementPeriodStart',
+    'StatementPeriodEnd',
+    'OpeningBalance',
+    'TxDate',
+    'MerchantOrDescription',
+    'Category',
+    'TxType',
+    'Amount',
+    'RunningBalance',
+    'TotalCredits',
+    'TotalDebits',
+    'ClosingBalance',
+  ];
+
+  const rows: string[] = [headers.join(',')];
+
+  for (const stmt of statements) {
+    for (const tx of stmt.transactions) {
+      const line = [
+        `"${stmt.statementId}"`,
+        `"${stmt.bank.name.replace(/"/g, '""')}"`,
+        `"${stmt.region}"`,
+        `"${stmt.currencyCode}"`,
+        `"${stmt.accountHolder.name.replace(/"/g, '""')}"`,
+        `"${stmt.accountHolder.accountNumber}"`,
+        `"${stmt.accountHolder.routingOrSortCode}"`,
+        `"${stmt.period.startDate}"`,
+        `"${stmt.period.endDate}"`,
+        stmt.openingBalance.toFixed(2),
+        `"${tx.date}"`,
+        `"${tx.description.replace(/"/g, '""')}"`,
+        `"${tx.category}"`,
+        `"${tx.type}"`,
+        tx.amount.toFixed(2),
+        tx.runningBalance.toFixed(2),
+        stmt.totalCredits.toFixed(2),
+        stmt.totalDebits.toFixed(2),
+        stmt.closingBalance.toFixed(2),
+      ];
+      rows.push(line.join(','));
+    }
+  }
+
+  return rows.join('\r\n');
+}
 
 /**
  * Export execution orchestrator based on settings and format

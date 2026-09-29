@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Download, Copy, Check, FileText, CheckCircle2 } from 'lucide-react';
 import { ExportFormat, GenerationSettings, SqlDialect, TabType } from '../types';
 
@@ -27,6 +27,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleCopy = () => {
@@ -39,7 +49,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const fileSizeKb = (exportContent.length / 1024).toFixed(1);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="export-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+    >
       <div
         className="w-full max-w-2xl rounded-2xl border shadow-xl flex flex-col max-h-[88vh] overflow-hidden animate-fadeIn"
         style={{
@@ -50,7 +65,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         {/* Modal Header */}
         <div className="p-4 sm:p-5 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-subtle)' }}>
           <div>
-            <h3 className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
+            <h3 id="export-modal-title" className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
               <Download className="w-4 h-4 text-[var(--accent-primary)]" />
               <span>Export Synthetic Dataset</span>
             </h3>

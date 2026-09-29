@@ -1,8 +1,11 @@
 import type { StoredDataset } from '../types';
+import type { UserRecord } from '../types/auth';
+import { hashPassword } from './auth';
 
 const DB_NAME = 'synthforge_datasets_db';
-const DB_VERSION = 1;
-const STORE_NAME = 'datasets';
+const DB_VERSION = 2;
+const STORE_DATASETS = 'datasets';
+const STORE_USERS = 'users';
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -15,8 +18,12 @@ function openDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(STORE_DATASETS)) {
+        db.createObjectStore(STORE_DATASETS, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORE_USERS)) {
+        const userStore = db.createObjectStore(STORE_USERS, { keyPath: 'id' });
+        userStore.createIndex('email', 'email', { unique: true });
       }
     };
 
@@ -25,11 +32,15 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
+// -------------------------------------------------------------
+// Datasets Operations
+// -------------------------------------------------------------
+
 export async function saveDatasetToDb(dataset: StoredDataset): Promise<void> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
+    const tx = db.transaction(STORE_DATASETS, 'readwrite');
+    const store = tx.objectStore(STORE_DATASETS);
     const req = store.put(dataset);
 
     req.onsuccess = () => resolve();
@@ -37,14 +48,22 @@ export async function saveDatasetToDb(dataset: StoredDataset): Promise<void> {
   });
 }
 
-export async function getAllDatasetsFromDb(): Promise<StoredDataset[]> {
+export async function getAllDatasetsFromDb(userId?: string): Promise<StoredDataset[]> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
+    const tx = db.transaction(STORE_DATASETS, 'readonly');
+    const store = tx.objectStore(STORE_DATASETS);
     const req = store.getAll();
 
-    req.onsuccess = () => resolve(req.result || []);
+    req.onsuccess = () => {
+      const all: StoredDataset[] = req.result || [];
+      if (!userId) {
+        resolve(all);
+      } else {
+        // Return datasets created by this user or default sample datasets with no userId
+        resolve(all.filter((d) => d.userId === userId || !d.userId));
+      }
+    };
     req.onerror = () => reject(req.error);
   });
 }
@@ -52,8 +71,8 @@ export async function getAllDatasetsFromDb(): Promise<StoredDataset[]> {
 export async function getDatasetByIdFromDb(id: string): Promise<StoredDataset | null> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
+    const tx = db.transaction(STORE_DATASETS, 'readonly');
+    const store = tx.objectStore(STORE_DATASETS);
     const req = store.get(id);
 
     req.onsuccess = () => resolve(req.result || null);
@@ -64,13 +83,118 @@ export async function getDatasetByIdFromDb(id: string): Promise<StoredDataset | 
 export async function deleteDatasetFromDb(id: string): Promise<void> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
+    const tx = db.transaction(STORE_DATASETS, 'readwrite');
+    const store = tx.objectStore(STORE_DATASETS);
     const req = store.delete(id);
 
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
+}
+
+// -------------------------------------------------------------
+// Users Operations (IndexedDB Local Accounts)
+// -------------------------------------------------------------
+
+export async function saveUserToDb(user: UserRecord): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_USERS, 'readwrite');
+    const store = tx.objectStore(STORE_USERS);
+    const req = store.put(user);
+
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function getUserByEmailFromDb(email: string): Promise<UserRecord | null> {
+  const normEmail = email.trim().toLowerCase();
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_USERS, 'readonly');
+    const store = tx.objectStore(STORE_USERS);
+    const index = store.index('email');
+    const req = index.get(normEmail);
+
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function getUserByIdFromDb(id: string): Promise<UserRecord | null> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_USERS, 'readonly');
+    const store = tx.objectStore(STORE_USERS);
+    const req = store.get(id);
+
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function updateUserInDb(id: string, updates: Partial<UserRecord>): Promise<void> {
+  const existing = await getUserByIdFromDb(id);
+  if (!existing) {
+    throw new Error('User not found');
+  }
+  const updated = { ...existing, ...updates };
+  await saveUserToDb(updated);
+}
+
+/**
+ * Delete account and all its user datasets from IndexedDB
+ */
+export async function deleteUserDataFromDb(userId: string): Promise<void> {
+  const db = await openDatabase();
+  // 1. Delete user record
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_USERS, 'readwrite');
+    const store = tx.objectStore(STORE_USERS);
+    const req = store.delete(userId);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+
+  // 2. Delete user's datasets
+  const allDatasets = await getAllDatasetsFromDb();
+  const userDatasetIds = allDatasets.filter((d) => d.userId === userId).map((d) => d.id);
+
+  if (userDatasetIds.length > 0) {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_DATASETS, 'readwrite');
+      const store = tx.objectStore(STORE_DATASETS);
+      for (const id of userDatasetIds) {
+        store.delete(id);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+}
+
+/**
+ * Seed demo user account on first run: demo@synthforge.app / Demo12345
+ */
+export async function seedDemoUserIfMissing(): Promise<void> {
+  try {
+    const existing = await getUserByEmailFromDb('demo@synthforge.app');
+    if (existing) return;
+
+    const { hash, salt } = await hashPassword('Demo12345');
+    const demoUser: UserRecord = {
+      id: 'usr_demo_account',
+      name: 'Demo Architect',
+      email: 'demo@synthforge.app',
+      passwordHash: hash,
+      passwordSalt: salt,
+      createdAt: Date.now(),
+    };
+    await saveUserToDb(demoUser);
+  } catch (err) {
+    console.warn('Could not seed demo account:', err);
+  }
 }
 
 /**

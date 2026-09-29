@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { Theme, TabType } from '../types';
 import { ThemeSwitcher } from './ThemeSwitcher';
+import { UserMenu } from './UserMenu';
 
 interface HeaderProps {
   currentTheme: Theme;
@@ -405,6 +406,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onOpenShortcuts}
+            aria-label="Keyboard Shortcuts"
             className="hidden 2xl:flex p-1.5 rounded-lg border text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition-colors cursor-pointer"
             style={{ borderColor: 'var(--border-subtle)' }}
             title="Keyboard Shortcuts"
@@ -417,6 +419,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onOpenTour}
+            aria-label="Onboarding Guided Tour"
             className="p-1.5 rounded-lg border text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition-colors cursor-pointer"
             style={{ borderColor: 'var(--border-subtle)' }}
             title="Onboarding Guided Tour"
@@ -426,6 +429,9 @@ export const Header: React.FC<HeaderProps> = ({
         )}
 
         <ThemeSwitcher currentTheme={currentTheme} onThemeChange={onThemeChange} />
+
+        {/* User Account Menu */}
+        <UserMenu />
 
         {onOpenValidation && (
           <button

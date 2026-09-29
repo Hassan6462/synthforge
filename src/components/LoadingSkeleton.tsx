@@ -49,3 +49,22 @@ export const CardLoadingSkeleton: React.FC = () => {
     </div>
   );
 };
+
+export const PageLoadingSkeleton: React.FC = () => {
+  return (
+    <div className="flex-1 p-6 flex flex-col gap-6 animate-pulse">
+      <div className="h-8 w-64 rounded-lg" style={{ backgroundColor: 'var(--bg-surface-elevated)' }} />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <CardLoadingSkeleton />
+        <CardLoadingSkeleton />
+        <CardLoadingSkeleton />
+      </div>
+      <div
+        className="flex-1 rounded-xl border p-4"
+        style={{ backgroundColor: 'var(--bg-surface)', borderColor: 'var(--border-subtle)' }}
+      >
+        <TableLoadingSkeleton rows={6} cols={5} />
+      </div>
+    </div>
+  );
+};

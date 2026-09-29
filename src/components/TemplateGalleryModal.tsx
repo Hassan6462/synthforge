@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, ShoppingBag, Landmark, Users, Stethoscope, ArrowRight, Check } from 'lucide-react';
 import { generateKeywordFallbackSchema } from '../utils/keywordTemplates';
 import type { GeneratedAiSchemaResponse } from '../utils/keywordTemplates';
@@ -61,6 +61,16 @@ export const TemplateGalleryModal: React.FC<TemplateGalleryModalProps> = ({
   onClose,
   onSelectTemplate,
 }) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handlePick = (prompt: string) => {
@@ -70,7 +80,12 @@ export const TemplateGalleryModal: React.FC<TemplateGalleryModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs animate-in fade-in duration-200">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="template-gallery-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs animate-in fade-in duration-200"
+    >
       <div
         className="w-full max-w-4xl rounded-2xl border shadow-2xl flex flex-col max-h-[90vh] overflow-hidden"
         style={{
@@ -81,7 +96,7 @@ export const TemplateGalleryModal: React.FC<TemplateGalleryModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
           <div>
-            <h2 className="text-base font-bold text-[var(--text-primary)]">Template Gallery</h2>
+            <h2 id="template-gallery-title" className="text-base font-bold text-[var(--text-primary)]">Template Gallery</h2>
             <p className="text-xs text-[var(--text-secondary)]">
               Production-tested relational databases and multi-table schemas ready to generate
             </p>
@@ -89,6 +104,7 @@ export const TemplateGalleryModal: React.FC<TemplateGalleryModalProps> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close dialog"
             className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />

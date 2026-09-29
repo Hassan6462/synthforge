@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   X,
@@ -16,6 +16,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import { ColumnDefinition, GenerationSettings, SchemaPatch, CopilotResponse } from '../types';
+import { generateCopilotFallbackPatch } from '../utils/copilotFallback';
 import { useToast } from '../context/ToastContext';
 
 interface CopilotSidePanelProps {
@@ -37,6 +38,16 @@ export const CopilotSidePanel: React.FC<CopilotSidePanelProps> = ({
   const [prompt, setPrompt] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [copilotResult, setCopilotResult] = useState<CopilotResponse | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -75,15 +86,21 @@ export const CopilotSidePanel: React.FC<CopilotSidePanelProps> = ({
         setCopilotResult({
           summary: resJson.data.summary,
           patches: resJson.data.patches,
-          source: resJson.source,
+          source: resJson.source === 'gemini' ? 'gemini' : 'fallback',
         });
         toast.info('Copilot Suggestion Ready', resJson.data.summary);
       } else {
         throw new Error('Invalid copilot payload received.');
       }
-    } catch (err: any) {
-      console.warn('Copilot request failed:', err);
-      toast.error('Copilot Error', err?.message || 'Failed to generate schema patch.');
+    } catch {
+      // In static hosting, network error, 404, or 500: run local fallback directly!
+      const fallback = generateCopilotFallbackPatch(query, currentColumns, currentSettings);
+      setCopilotResult({
+        summary: fallback.summary,
+        patches: fallback.patches,
+        source: 'fallback',
+      });
+      toast.info('Copilot Suggestion Ready', fallback.summary);
     } finally {
       setIsLoading(false);
     }
@@ -104,6 +121,9 @@ export const CopilotSidePanel: React.FC<CopilotSidePanelProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="AI Schema Copilot"
       className="fixed inset-y-0 right-0 z-50 w-full sm:w-[450px] bg-[var(--bg-surface)] border-l shadow-2xl flex flex-col transition-all"
       style={{ borderColor: 'var(--border-subtle)' }}
     >
@@ -117,14 +137,26 @@ export const CopilotSidePanel: React.FC<CopilotSidePanelProps> = ({
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-[var(--text-primary)]">AI Schema Copilot</h3>
-            <span className="text-[10px] text-purple-400 font-mono">Gemini-Powered Architect</span>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-[var(--text-primary)]">AI Schema Copilot</h3>
+              <span
+                className={`px-1.5 py-0.5 text-[9px] font-mono font-semibold rounded border ${
+                  copilotResult?.source === 'gemini'
+                    ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                }`}
+              >
+                AI: {copilotResult?.source === 'gemini' ? 'Gemini' : 'Offline rules'}
+              </span>
+            </div>
+            <span className="text-[10px] text-[var(--text-muted)] font-mono">Real-time schema refinement</span>
           </div>
         </div>
 
         <button
           type="button"
           onClick={onClose}
+          aria-label="Close copilot"
           className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
         >
           <X className="w-4 h-4" />

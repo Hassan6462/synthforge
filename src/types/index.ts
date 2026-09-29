@@ -156,6 +156,7 @@ export interface GeneratedDataStats {
 // Stored Dataset for Data Sources
 export interface StoredDataset {
   id: string;
+  userId?: string;
   name: string;
   format: 'csv' | 'json' | 'xlsx' | 'tsv';
   sizeBytes: number;

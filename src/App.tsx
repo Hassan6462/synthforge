@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense } from 'react';
 import {
   Theme,
   TabType,
@@ -31,29 +31,53 @@ import { CenterPreview } from './components/CenterPreview';
 import { ConfigPanel } from './components/ConfigPanel';
 import { ExportModal } from './components/ExportModal';
 import { ExportProgressModal } from './components/ExportProgressModal';
-import { ValidationReportModal } from './components/ValidationReportModal';
 import { DescribeItModal } from './components/DescribeItModal';
 import { TemplateGalleryModal } from './components/TemplateGalleryModal';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { OnboardingTour } from './components/OnboardingTour';
 import { HomeDashboard } from './components/HomeDashboard';
-import { DataSourcesPage } from './components/DataSourcesPage';
-import { EDAPage } from './components/EDAPage';
-import { TimeSeriesPage } from './components/TimeSeriesPage';
-import { NotebooksPage } from './components/NotebooksPage';
-import { QualityPage } from './components/QualityPage';
-import { ScenarioBuilderPage } from './components/ScenarioBuilderPage';
 import { CopilotSidePanel } from './components/CopilotSidePanel';
-import { JobsPage } from './components/JobsPage';
-import { ApiPage } from './components/ApiPage';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
+import { PageLoadingSkeleton } from './components/LoadingSkeleton';
 import { runValidationSuite } from './utils/dataValidator';
 import { ToastProvider, useToast } from './context/ToastContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { LoginPage } from './components/LoginPage';
 import { parseUploadedDataFile } from './utils/csvParser';
 import type { GeneratedAiSchemaResponse } from './utils/keywordTemplates';
 
+// Lazy-loaded pages and heavyweight modal for performance optimization
+const NotebooksPage = React.lazy(() =>
+  import('./components/NotebooksPage').then((m) => ({ default: m.NotebooksPage }))
+);
+const TimeSeriesPage = React.lazy(() =>
+  import('./components/TimeSeriesPage').then((m) => ({ default: m.TimeSeriesPage }))
+);
+const QualityPage = React.lazy(() =>
+  import('./components/QualityPage').then((m) => ({ default: m.QualityPage }))
+);
+const EDAPage = React.lazy(() =>
+  import('./components/EDAPage').then((m) => ({ default: m.EDAPage }))
+);
+const ScenarioBuilderPage = React.lazy(() =>
+  import('./components/ScenarioBuilderPage').then((m) => ({ default: m.ScenarioBuilderPage }))
+);
+const JobsPage = React.lazy(() =>
+  import('./components/JobsPage').then((m) => ({ default: m.JobsPage }))
+);
+const ApiPage = React.lazy(() =>
+  import('./components/ApiPage').then((m) => ({ default: m.ApiPage }))
+);
+const DataSourcesPage = React.lazy(() =>
+  import('./components/DataSourcesPage').then((m) => ({ default: m.DataSourcesPage }))
+);
+const ValidationReportModal = React.lazy(() =>
+  import('./components/ValidationReportModal').then((m) => ({ default: m.ValidationReportModal }))
+);
+
 function MainApp() {
   const toast = useToast();
+  const { user, status, logout } = useAuth();
 
   // 1. Theme State with LocalStorage Persistence
   const [theme, setTheme] = useState<Theme>(() => {
@@ -92,13 +116,19 @@ function MainApp() {
   const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
-  const [isTourOpen, setIsTourOpen] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('synthforge_has_seen_tour') !== 'true';
-    } catch {
-      return false;
+  const [isTourOpen, setIsTourOpen] = useState<boolean>(false);
+
+  // Show OnboardingTour ONLY after the first successful sign-in of a user
+  useEffect(() => {
+    if (user && !user.isGuest) {
+      try {
+        const seen = localStorage.getItem(`synthforge_${user.id}_has_seen_tour`);
+        if (seen !== 'true') {
+          setIsTourOpen(true);
+        }
+      } catch {}
     }
-  });
+  }, [user]);
 
   // Global Ctrl+K / Cmd+K listener
   useEffect(() => {
@@ -112,33 +142,30 @@ function MainApp() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
-  // 5. Telemetry & History State
-  const [totalRowsGenerated, setTotalRowsGenerated] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem('synthforge_total_rows_generated');
-      return saved ? parseInt(saved, 10) : 148500;
-    } catch {
-      return 148500;
-    }
-  });
+  // User prefix for scoped storage
+  const userPrefix = user?.id || 'guest';
 
-  const [recentJobs, setRecentJobs] = useState<GenerationJobLog[]>(() => {
-    try {
-      const saved = localStorage.getItem('synthforge_recent_jobs');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  // 5. Telemetry & History State (Scoped per user ID)
+  const [totalRowsGenerated, setTotalRowsGenerated] = useState<number>(148500);
+  const [recentJobs, setRecentJobs] = useState<GenerationJobLog[]>([]);
+  const [recentProjects, setRecentProjects] = useState<SynthForgeProject[]>([]);
 
-  const [recentProjects, setRecentProjects] = useState<SynthForgeProject[]>(() => {
+  // Sync user-scoped storage when user logs in or switches
+  useEffect(() => {
+    if (!user) return;
     try {
-      const saved = localStorage.getItem('synthforge_recent_projects');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
+      const savedRows = localStorage.getItem(`synthforge_${userPrefix}_total_rows_generated`);
+      setTotalRowsGenerated(savedRows ? parseInt(savedRows, 10) : (user.isGuest ? 148500 : 0));
+
+      const savedJobs = localStorage.getItem(`synthforge_${userPrefix}_recent_jobs`);
+      setRecentJobs(savedJobs ? JSON.parse(savedJobs) : []);
+
+      const savedProjects = localStorage.getItem(`synthforge_${userPrefix}_recent_projects`);
+      setRecentProjects(savedProjects ? JSON.parse(savedProjects) : []);
+    } catch (err) {
+      console.error('Failed to load user-scoped data:', err);
     }
-  });
+  }, [userPrefix, user]);
 
   const [selectedEdaDataset, setSelectedEdaDataset] = useState<StoredDataset | null>(null);
 
@@ -235,7 +262,7 @@ function MainApp() {
       setRecentJobs((prev) => {
         const updated = [newJob, ...prev.slice(0, 19)];
         try {
-          localStorage.setItem('synthforge_recent_jobs', JSON.stringify(updated));
+          localStorage.setItem(`synthforge_${userPrefix}_recent_jobs`, JSON.stringify(updated));
         } catch {}
         return updated;
       });
@@ -243,12 +270,12 @@ function MainApp() {
       setTotalRowsGenerated((prev) => {
         const next = prev + count;
         try {
-          localStorage.setItem('synthforge_total_rows_generated', String(next));
+          localStorage.setItem(`synthforge_${userPrefix}_total_rows_generated`, String(next));
         } catch {}
         return next;
       });
     },
-    [settings.seed]
+    [settings.seed, userPrefix]
   );
 
   // Re-generate dataset
@@ -533,7 +560,7 @@ function MainApp() {
     setRecentProjects((prev) => {
       const updated = [project, ...prev.filter((p) => p.name !== project.name).slice(0, 9)];
       try {
-        localStorage.setItem('synthforge_recent_projects', JSON.stringify(updated));
+        localStorage.setItem(`synthforge_${userPrefix}_recent_projects`, JSON.stringify(updated));
       } catch {}
       return updated;
     });
@@ -611,9 +638,9 @@ function MainApp() {
   const handleClearJobs = useCallback(() => {
     setRecentJobs([]);
     try {
-      localStorage.removeItem('synthforge_recent_jobs');
+      localStorage.removeItem(`synthforge_${userPrefix}_recent_jobs`);
     } catch {}
-  }, []);
+  }, [userPrefix]);
 
   // Scenario Applicators
   const handleApplyTabularScenario = useCallback((cols: ColumnDefinition[], settingsPatch: Partial<GenerationSettings>) => {
@@ -641,11 +668,11 @@ function MainApp() {
     setRecentJobs((prev) => {
       const updated = [newJob, ...prev].slice(0, 50);
       try {
-        localStorage.setItem('synthforge_recent_jobs', JSON.stringify(updated));
+        localStorage.setItem(`synthforge_${userPrefix}_recent_jobs`, JSON.stringify(updated));
       } catch {}
       return updated;
     });
-  }, [settings.seed]);
+  }, [settings.seed, userPrefix]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -700,6 +727,33 @@ function MainApp() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleRegenerate, handleSaveProject]);
+
+  // If session is still loading, show branded loading splash
+  if (status === 'loading') {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-4 transition-colors"
+        style={{
+          backgroundColor: 'var(--bg-canvas)',
+          color: 'var(--text-primary)',
+        }}
+      >
+        <div className="flex flex-col items-center gap-3 animate-pulse">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-lg text-white shadow-xl bg-gradient-to-tr from-cyan-500 to-indigo-600">
+            SF
+          </div>
+          <div className="text-sm font-semibold tracking-wide text-[var(--text-secondary)]">
+            Initializing SynthForge...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If not authenticated, show full-screen LoginPage BEFORE anything else
+  if (status === 'unauthenticated' || !user) {
+    return <LoginPage currentTheme={theme} onThemeChange={setTheme} />;
+  }
 
   return (
     <div
@@ -759,6 +813,34 @@ function MainApp() {
         isGenerating={isWorkerGenerating}
         stats={currentStats}
       />
+
+      {/* Guest Mode Session Warning Banner */}
+      {user.isGuest && (
+        <div
+          role="status"
+          className="flex items-center justify-between px-3 sm:px-4 py-2 border-b text-xs font-medium backdrop-blur-xs transition-colors"
+          style={{
+            backgroundColor: 'rgba(245, 158, 11, 0.08)',
+            borderColor: 'rgba(245, 158, 11, 0.25)',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span className="font-semibold text-amber-400">Guest Session:</span>
+            <span className="text-[var(--text-secondary)]">
+              Your schemas and datasets are stored locally in this browser. Create an account to secure them.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={logout}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 transition-all cursor-pointer whitespace-nowrap"
+          >
+            Create Permanent Account
+          </button>
+        </div>
+      )}
 
       {/* Main Content Area */}
       {activeTab === 'home' && (
@@ -942,9 +1024,11 @@ function MainApp() {
         isOpen={isTourOpen}
         onClose={() => {
           setIsTourOpen(false);
-          try {
-            localStorage.setItem('synthforge_has_seen_tour', 'true');
-          } catch {}
+          if (user && !user.isGuest) {
+            try {
+              localStorage.setItem(`synthforge_${user.id}_has_seen_tour`, 'true');
+            } catch {}
+          }
         }}
         onNavigateTab={handleTabChange}
       />
@@ -1007,7 +1091,9 @@ function MainApp() {
 export default function App() {
   return (
     <ToastProvider>
-      <MainApp />
+      <AuthProvider>
+        <MainApp />
+      </AuthProvider>
     </ToastProvider>
   );
 }

@@ -1,5 +1,5 @@
 import { faker } from '@faker-js/faker';
-import type { ColumnDefinition, CategoryWeight, SqlDialect, GenerationSettings } from '../types';
+import type { ColumnDefinition, CategoryWeight, SqlDialect, GenerationSettings, TableSchema, DocumentRegion } from '../types';
 import {
   generateRawValue,
   escapeCsv,
@@ -7,10 +7,11 @@ import {
   generateTabularPreview,
 } from '../utils/tabularFakerGenerator';
 import { applyPrivacyTransform, applyEdgeCaseInjection } from '../utils/privacyAndEdgeCases';
+import { generateRelationalData, generateDocumentData } from '../utils/generators';
 
 export interface GenerateWorkerMessage {
   taskId: string;
-  action: 'GENERATE_PREVIEW' | 'GENERATE_EXPORT_CHUNKED' | 'CANCEL_EXPORT';
+  action: 'GENERATE_PREVIEW' | 'GENERATE_EXPORT_CHUNKED' | 'CANCEL_EXPORT' | 'GENERATE_RELATIONAL' | 'GENERATE_DOCUMENT';
   schema?: ColumnDefinition[];
   rowCount?: number;
   seed?: number;
@@ -19,6 +20,9 @@ export interface GenerateWorkerMessage {
   sqlDialect?: SqlDialect;
   csvDelimiter?: string;
   settings?: GenerationSettings;
+  tables?: TableSchema[];
+  templateType?: any;
+  documentRegion?: DocumentRegion;
 }
 
 export interface GenerateWorkerResponse {
@@ -28,8 +32,19 @@ export interface GenerateWorkerResponse {
     | 'EXPORT_PROGRESS'
     | 'EXPORT_SUCCESS'
     | 'EXPORT_CANCELLED'
+    | 'RELATIONAL_SUCCESS'
+    | 'DOCUMENT_SUCCESS'
     | 'ERROR';
   previewRows?: Record<string, any>[];
+  relationalResult?: {
+    tablesData: Record<string, any[]>;
+    relationships: any[];
+    stats: any;
+  };
+  documentResult?: {
+    documents: any[];
+    stats: any;
+  };
   blob?: Blob;
   totalCount?: number;
   currentCount?: number;
@@ -56,12 +71,53 @@ self.onmessage = async (e: MessageEvent<GenerateWorkerMessage>) => {
     sqlDialect = 'postgresql',
     csvDelimiter = ',',
     settings,
+    tables = [],
+    templateType = 'invoice',
+    documentRegion = 'US',
   } = e.data;
 
   // Handle Cancel
   if (action === 'CANCEL_EXPORT') {
     cancelledTasks.add(taskId);
     self.postMessage({ taskId, type: 'EXPORT_CANCELLED' });
+    return;
+  }
+
+  // Handle Relational Generation
+  if (action === 'GENERATE_RELATIONAL') {
+    try {
+      const res = generateRelationalData(tables, settings || ({} as any));
+      self.postMessage({
+        taskId,
+        type: 'RELATIONAL_SUCCESS',
+        relationalResult: res,
+      });
+    } catch (err: any) {
+      self.postMessage({
+        taskId,
+        type: 'ERROR',
+        error: err?.message || 'Relational generation failed in Web Worker',
+      });
+    }
+    return;
+  }
+
+  // Handle Document Generation
+  if (action === 'GENERATE_DOCUMENT') {
+    try {
+      const res = generateDocumentData(templateType, settings || ({} as any), documentRegion);
+      self.postMessage({
+        taskId,
+        type: 'DOCUMENT_SUCCESS',
+        documentResult: res,
+      });
+    } catch (err: any) {
+      self.postMessage({
+        taskId,
+        type: 'ERROR',
+        error: err?.message || 'Document generation failed in Web Worker',
+      });
+    }
     return;
   }
 
