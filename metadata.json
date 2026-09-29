@@ -1,0 +1,6 @@
+{
+  "name": "SynthForge",
+  "description": "High-fidelity synthetic data generation platform for tabular, relational schemas, and complex documents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
